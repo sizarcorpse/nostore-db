@@ -463,85 +463,6 @@ class Collection {
 
     return removedDocument;
   }
-
-  where(field) {
-    return new Query(this, field);
-  }
-}
-
-class Query {
-  constructor(collection, field) {
-    this.collection = collection;
-    this.query = {};
-    this.currentField = field;
-  }
-
-  where(field) {
-    this.currentField = field;
-    return this;
-  }
-
-  in(values) {
-    this.query[this.currentField] = { $in: values };
-    return this;
-  }
-
-  gt(value) {
-    this.query[this.currentField] = {
-      ...this.query[this.currentField],
-      $gt: value,
-    };
-    return this;
-  }
-
-  lt(value) {
-    this.query[this.currentField] = {
-      ...this.query[this.currentField],
-      $lt: value,
-    };
-    return this;
-  }
-
-  equals(value) {
-    this.query[this.currentField] = {
-      ...this.query[this.currentField],
-      $eq: value,
-    };
-    return this;
-  }
-
-  or(conditions) {
-    this.query[this.currentField] = {
-      ...this.query[this.currentField],
-      $or: conditions,
-    };
-    return this;
-  }
-
-  and(conditions) {
-    this.query[this.currentField] = {
-      ...this.query[this.currentField],
-      $and: conditions,
-    };
-    return this;
-  }
-
-  not(condition) {
-    if (!this.query[this.currentField]) {
-      this.query[this.currentField] = {};
-    }
-
-    if (!this.query[this.currentField].$not) {
-      this.query[this.currentField].$not = [];
-    }
-
-    this.query[this.currentField].$not.push(condition);
-    return this;
-  }
-
-  exec() {
-    return this.collection.find(this.query).exec();
-  }
 }
 
 const db = new Database("store");
@@ -559,11 +480,11 @@ let results = users
   })
   .exec();
 
-// let results = users.where("gender_abbr").in(["M"]).limitBy(5).exec();
-
 console.log(results.length);
 results.map((user) => console.log(user));
 
 /*
+
+
 
 */
