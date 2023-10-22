@@ -126,7 +126,14 @@ class Collection {
       );
     }
 
-    // implement $not
+    if (condition.$not) {
+      const notConditions = Array.isArray(condition.$not)
+        ? condition.$not
+        : [condition.$not];
+      return notConditions.every(
+        (cond) => !this.matchesCondition(document, cond)
+      );
+    }
 
     for (let field in condition) {
       if (typeof condition[field] === "object" && condition[field] !== null) {
@@ -181,6 +188,12 @@ class Collection {
             case "$and":
               return condition[field][operator].every((cond) =>
                 this.matchesCondition(document, cond)
+              );
+
+            case "$not":
+              return !this.matchesCondition(
+                document,
+                condition[field][operator]
               );
 
             default:
@@ -505,6 +518,7 @@ class Query {
     };
     return this;
   }
+
   exec() {
     return this.collection.find(this.query).exec();
   }
@@ -515,7 +529,9 @@ const users = db.collection("users");
 
 let results = users
   .find({
-    $and: [{ age: { $gt: 20 } }, { age: { $lt: 23 } }],
+    $not: {
+      gender_abbr: { $in: ["M"] },
+    },
   })
   .sortBy("age")
   .orderBy("asc")
@@ -525,6 +541,5 @@ console.log(results.length);
 results.map((user) => console.log(user));
 
 /* 
-
 
 */
