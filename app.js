@@ -2,6 +2,7 @@
 TODO:[] count(query).
 TODO:[] exists(query).
 TODO:[] distinct(field).
+TODO:[] fix case.
 */
 
 class Database {
@@ -34,10 +35,46 @@ class Database {
       collections: collectionNames,
     };
   }
+
+  documentId() {
+    let id = "";
+    let characters = "abcdefghijklmnopqrstuvwxyz0123456789";
+    for (let i = 0; i < 10; i++) {
+      id += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    let now = Date.now();
+    let secondPart = Math.floor(now * Math.PI).toString(16);
+
+    return id + "-" + secondPart;
+  }
+
+  isValidDocumentId(id) {
+    let parts = id.split("-");
+    let regex = /^[A-Za-z0-9]{10}$/;
+    if (!regex.test(parts[0])) {
+      return false;
+    }
+    let now = Date.now();
+    let maxTime = Math.floor(now * Math.PI).toString(16);
+    let secondPart = parseInt(parts[1], 16);
+
+    if (isNaN(secondPart) || secondPart > maxTime) {
+      return false;
+    }
+
+    return true;
+  }
 }
 
 class Collection {
   constructor(database, collectionName) {
+    this.database = database;
+    this.collectionName = collectionName;
+    this.documentId = this.database.documentId.bind(this.database);
+    this.isValidDocumentId = this.database.isValidDocumentId.bind(
+      this.database
+    );
+
     if (!collectionName) {
       throw new Error("A collection name is required.");
     }
@@ -46,8 +83,6 @@ class Collection {
         "The collection name must be a string and have at least 3 characters."
       );
     }
-    this.database = database;
-    this.collectionName = collectionName;
 
     let store = JSON.parse(localStorage.getItem(this.database.dbName));
     if (!store[this.collectionName]) {
@@ -71,17 +106,58 @@ class Collection {
   }
 
   matchesCondition(document, condition) {
-    for (let key in condition) {
-      if (Array.isArray(condition[key])) {
-        if (
-          !condition[key].some((value) =>
-            this.compareValues(document[key], value)
-          )
-        ) {
+    for (let field in condition) {
+      if (typeof condition[field] === "object" && condition[field] !== null) {
+        for (let operator in condition[field]) {
+          switch (operator) {
+            case "$gt":
+              if (document[field] <= condition[field][operator]) {
+                return false;
+              }
+              break;
+            case "$lt":
+              if (document[field] >= condition[field][operator]) {
+                return false;
+              }
+              break;
+            case "$gte":
+              if (document[field] < condition[field][operator]) {
+                return false;
+              }
+              break;
+            case "$lte":
+              if (document[field] > condition[field][operator]) {
+                return false;
+              }
+              break;
+            case "$eq":
+              if (document[field] !== condition[field][operator]) {
+                return false;
+              }
+              break;
+            case "$ne":
+              if (document[field] === condition[field][operator]) {
+                return false;
+              }
+              break;
+            case "$in":
+              if (!condition[field][operator].includes(document[field])) {
+                return false;
+              }
+              break;
+            case "$nin":
+              if (condition[field][operator].includes(document[field])) {
+                return false;
+              }
+              break;
+            default:
+              return false;
+          }
+        }
+      } else {
+        if (document[field] !== condition[field]) {
           return false;
         }
-      } else if (!this.compareValues(document[key], condition[key])) {
-        return false;
       }
     }
     return true;
@@ -106,15 +182,7 @@ class Collection {
         throw new Error("Data must be a non-empty object.");
       }
 
-      let _id = "xxxxxxxx-xxxx-xxx-yxxx-xxxxxxxxxxxx".replace(
-        /[xy]/g,
-        function (c) {
-          let r = (Math.random() * 16) | 0,
-            v = c === "x" ? r : (r & 0x3) | 0x8;
-          return v.toString(16);
-        }
-      );
-
+      let _id = this.documentId();
       item._id = _id;
       item.createdAt = new Date().toISOString();
       item.updatedAt = new Date().toISOString();
@@ -128,7 +196,7 @@ class Collection {
   }
 
   findById(id) {
-    if (typeof id !== "string" || id.length !== 35) {
+    if (typeof id !== "string" || !this.isValidDocumentId(id)) {
       throw new Error("Invalid id");
     }
     let { collection } = this.getCollectionAndStore();
@@ -252,7 +320,7 @@ class Collection {
   }
 
   updateById(id, data) {
-    if (typeof id !== "string" || id.length !== 35) {
+    if (typeof id !== "string" || !this.isValidDocumentId(id)) {
       throw new Error("Invalid id");
     }
 
@@ -318,7 +386,7 @@ class Collection {
   }
 
   removeById(id) {
-    if (typeof id !== "string" || id.length !== 35) {
+    if (typeof id !== "string" || !this.isValidDocumentId(id)) {
       throw new Error("Invalid id");
     }
 
@@ -347,30 +415,31 @@ class Collection {
 const db = new Database("store");
 const users = db.collection("users");
 
-// const fbi = users.findById("e6f72b15-9e14-817-b7d6-cdb1f84eb333");
+// const fbi = users.findById("0482r1po71-4d9feca27ce");
 // console.log(fbi);
 
-// const user = users
-//   .find([{ first_name: "Sizar" }, { age: "20" }])
-//   .sortBy("age")
+// const page = 2;
+// const pageSize = 10;
+
+// const results = users
+//   .find()
+//   .sortBy("first_name")
 //   .orderBy("asc")
-//   .limitBy(4)
+//   .skipBy((page - 1) * pageSize)
+//   .limitBy(pageSize)
 //   .exec();
-// console.log(user.length);
-// user.map((item) => console.log(item));
 
-// console.log(users.find([{ city: "New York" }, { city: "Vicksburg" }]).exec());
-// const uu = users.update([{ city: "New York" }, { city: "Vicksburg" }], {
-//   age: "100",
-// });
-// console.log(uu);
+// console.log(results);
 
-// const ubi = users.updateById("e6f72b15-9e14-817-b7d6-cdb1f84eb333", {
-//   city: "New York",
-// });
-// const dbi = users.removeById("757a0cb5-103a-efb-a322-ed9ad12be0a1");
-// console.log(dbi);
+/* 
 
-/*
 
 */
+
+// const n = users.create({
+//   first_name: "Nikola",
+//   last_name: "Tesla",
+//   age: 86,
+// });
+
+console.log(users.find().exec());
