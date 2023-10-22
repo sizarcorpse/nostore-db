@@ -191,10 +191,17 @@ class Collection {
               );
 
             case "$not":
-              return !this.matchesCondition(
-                document,
-                condition[field][operator]
-              );
+              const notConditions = Array.isArray(condition[field][operator])
+                ? condition[field][operator]
+                : [condition[field][operator]];
+              if (
+                notConditions.some((cond) =>
+                  this.matchesCondition(document, { [field]: cond })
+                )
+              ) {
+                return false;
+              }
+              break;
 
             default:
               return false;
@@ -519,6 +526,19 @@ class Query {
     return this;
   }
 
+  not(condition) {
+    if (!this.query[this.currentField]) {
+      this.query[this.currentField] = {};
+    }
+
+    if (!this.query[this.currentField].$not) {
+      this.query[this.currentField].$not = [];
+    }
+
+    this.query[this.currentField].$not.push(condition);
+    return this;
+  }
+
   exec() {
     return this.collection.find(this.query).exec();
   }
@@ -529,17 +549,21 @@ const users = db.collection("users");
 
 let results = users
   .find({
-    $not: {
-      gender_abbr: { $in: ["M"] },
-    },
+    $not: [
+      {
+        gender_abbr: {
+          $in: ["M"],
+        },
+      },
+    ],
   })
-  .sortBy("age")
-  .orderBy("asc")
   .exec();
+
+// let results = users.where("gender_abbr").in(["M"]).limitBy(5).exec();
 
 console.log(results.length);
 results.map((user) => console.log(user));
 
-/* 
+/*
 
 */
