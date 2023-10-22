@@ -2,7 +2,14 @@
 TODO:[] count(query).
 TODO:[] exists(query).
 TODO:[] distinct(field).
-TODO:[] fix case.
+TODO:[] fix case sensitive queries.
+TODO:[] fix number sensitive queries.
+TODO:[] Error Handling
+TODO:[] Validation Schema Support
+TODO:[] Association Handling (Populate)(One to One, One to Many, Many to Many)
+TODO:[] Hooks/Middleware
+TODO:[] Static Methods
+TODO:[] Query Optimization
 */
 
 class Database {
@@ -74,6 +81,7 @@ class Collection {
     this.isValidDocumentId = this.database.isValidDocumentId.bind(
       this.database
     );
+    this.query = {};
 
     if (!collectionName) {
       throw new Error("A collection name is required.");
@@ -106,6 +114,20 @@ class Collection {
   }
 
   matchesCondition(document, condition) {
+    if (Array.isArray(condition.$or)) {
+      return condition.$or.some((cond) =>
+        this.matchesCondition(document, cond)
+      );
+    }
+
+    if (Array.isArray(condition.$and)) {
+      return condition.$and.every((cond) =>
+        this.matchesCondition(document, cond)
+      );
+    }
+
+    // implement $not
+
     for (let field in condition) {
       if (typeof condition[field] === "object" && condition[field] !== null) {
         for (let operator in condition[field]) {
@@ -150,6 +172,17 @@ class Collection {
                 return false;
               }
               break;
+
+            case "$or":
+              return condition[field][operator].some((cond) =>
+                this.matchesCondition(document, cond)
+              );
+
+            case "$and":
+              return condition[field][operator].every((cond) =>
+                this.matchesCondition(document, cond)
+              );
+
             default:
               return false;
           }
@@ -410,36 +443,88 @@ class Collection {
 
     return removedDocument;
   }
+
+  where(field) {
+    return new Query(this, field);
+  }
+}
+
+class Query {
+  constructor(collection, field) {
+    this.collection = collection;
+    this.query = {};
+    this.currentField = field;
+  }
+
+  where(field) {
+    this.currentField = field;
+    return this;
+  }
+
+  in(values) {
+    this.query[this.currentField] = { $in: values };
+    return this;
+  }
+
+  gt(value) {
+    this.query[this.currentField] = {
+      ...this.query[this.currentField],
+      $gt: value,
+    };
+    return this;
+  }
+
+  lt(value) {
+    this.query[this.currentField] = {
+      ...this.query[this.currentField],
+      $lt: value,
+    };
+    return this;
+  }
+
+  equals(value) {
+    this.query[this.currentField] = {
+      ...this.query[this.currentField],
+      $eq: value,
+    };
+    return this;
+  }
+
+  or(conditions) {
+    this.query[this.currentField] = {
+      ...this.query[this.currentField],
+      $or: conditions,
+    };
+    return this;
+  }
+
+  and(conditions) {
+    this.query[this.currentField] = {
+      ...this.query[this.currentField],
+      $and: conditions,
+    };
+    return this;
+  }
+  exec() {
+    return this.collection.find(this.query).exec();
+  }
 }
 
 const db = new Database("store");
 const users = db.collection("users");
 
-// const fbi = users.findById("0482r1po71-4d9feca27ce");
-// console.log(fbi);
+let results = users
+  .find({
+    $and: [{ age: { $gt: 20 } }, { age: { $lt: 23 } }],
+  })
+  .sortBy("age")
+  .orderBy("asc")
+  .exec();
 
-// const page = 2;
-// const pageSize = 10;
-
-// const results = users
-//   .find()
-//   .sortBy("first_name")
-//   .orderBy("asc")
-//   .skipBy((page - 1) * pageSize)
-//   .limitBy(pageSize)
-//   .exec();
-
-// console.log(results);
+console.log(results.length);
+results.map((user) => console.log(user));
 
 /* 
 
 
 */
-
-// const n = users.create({
-//   first_name: "Nikola",
-//   last_name: "Tesla",
-//   age: 86,
-// });
-
-console.log(users.find().exec());
