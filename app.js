@@ -55,7 +55,16 @@ class Database {
     return id + "-" + secondPart;
   }
   isValidDocumentId(id) {
+    if (typeof id !== "string") {
+      return false;
+    }
+
     let parts = id.split("-");
+
+    if (parts.length !== 2) {
+      return false;
+    }
+
     let regex = /^[A-Za-z0-9]{10}$/;
     if (!regex.test(parts[0])) {
       return false;
@@ -469,40 +478,50 @@ class Collection {
   }
 
   updateById(id, data) {
-    if (typeof id !== "string" || !this.isValidDocumentId(id)) {
-      throw new Error("Invalid id");
-    }
+    return this.runMiddlewares("pre", "updateById", { id, data }).then(
+      (modifiedData) => {
+        if (!modifiedData) throw new ErrorHandler("cui001");
 
-    if (
-      typeof data !== "object" ||
-      data === null ||
-      Object.keys(data).length === 0
-    ) {
-      throw new Error("Invalid data");
-    }
+        id = modifiedData.id;
+        data = modifiedData.data;
 
-    let { store, collection } = this.getCollectionAndStore();
+        if (!id) throw new ErrorHandler("cui002");
 
-    let updatedDocument = null;
-    collection.forEach((document, index) => {
-      if (document._id === id) {
-        for (let key in data) {
-          document[key] = data[key];
+        if (!this.isValidDocumentId(id)) {
+          throw new ErrorHandler("cui003");
         }
-        document.updatedAt = new Date().toISOString();
-        updatedDocument = document;
-        collection[index] = document;
+
+        if (
+          typeof data !== "object" ||
+          data === null ||
+          Object.keys(data).length === 0
+        ) {
+          throw new ErrorHandler("cdi004");
+        }
+
+        let { store, collection } = this.getCollectionAndStore();
+        let updatedDocument = null;
+        collection.forEach((document, index) => {
+          if (document._id === id) {
+            for (let key in data) {
+              document[key] = data[key];
+            }
+            document.updatedAt = new Date().toISOString();
+            updatedDocument = document;
+            collection[index] = document;
+          }
+        });
+
+        if (!updatedDocument) {
+          throw new Error("cdi005");
+        }
+
+        store[this.collectionName] = collection;
+        localStorage.setItem(this.database.dbName, JSON.stringify(store));
+
+        return this.runMiddlewares("post", "updateById", updatedDocument);
       }
-    });
-
-    if (!updatedDocument) {
-      throw new Error("No document found with the provided id");
-    }
-
-    store[this.collectionName] = collection;
-    localStorage.setItem(this.database.dbName, JSON.stringify(store));
-
-    return updatedDocument;
+    );
   }
 
   remove(query) {
@@ -576,7 +595,11 @@ class ErrorHandler extends Error {
     cf002: "orderBy must be 'asc' or 'desc'",
     cf003: "limitBy must be a positive number.",
     cf004: "skipBy must be a positive number.",
-    cf005: "",
+    cui001: "Invalid data, Must have an _id and data",
+    cui002: "Must provide an _id",
+    cui003: "Must be a valid document id",
+    cdi004: "Invalid data",
+    cdi005: "No document found with the provided id",
   };
 
   constructor(code, customMessage) {
@@ -588,33 +611,26 @@ class ErrorHandler extends Error {
 
 const db = new Database("store");
 const users = db.collection("users");
-const posts = db.collection("posts");
-
-users.pre("findOne", function (data, next) {
-  console.log("pre 💣", data);
-  next();
-});
-
-users.post("findOne", function (data, next) {
-  console.log("post 🚀", data);
-});
-
-const query = [
-  {
-    gender_abbr: "M",
-  },
-];
 
 users
-  .find(query)
-  .then((chainable) => {
-    return chainable.sortBy("age").orderBy("desc").limitBy(10).skipBy(5).exec();
+  .updateById("r9g3cyfozn-4da12ed2694", {
+    nickname: "Holo",
+    bio: "I am a wolf harvest deity.",
   })
-  .then((data) => {
-    console.log(data);
+  .then((updatedData) => {
+    console.log(updatedData);
   })
   .catch((error) => {
     console.log(error.code, error.message);
+  });
+
+users
+  .findOne({ first_name: "Sizar" })
+  .then((data) => {
+    console.log(JSON.stringify(data, null, 2));
+  })
+  .catch((error) => {
+    console.log(error);
   });
 
 /*
