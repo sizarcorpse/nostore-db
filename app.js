@@ -54,7 +54,6 @@ class Database {
 
     return id + "-" + secondPart;
   }
-
   isValidDocumentId(id) {
     let parts = id.split("-");
     let regex = /^[A-Za-z0-9]{10}$/;
@@ -63,9 +62,13 @@ class Database {
     }
     let now = Date.now();
     let maxTime = Math.floor(now * Math.PI).toString(16);
-    let secondPart = parseInt(parts[1], 16);
+    let secondPart = parts[1];
 
-    if (isNaN(secondPart) || secondPart > maxTime) {
+    let hexRegex = /^[0-9A-Fa-f]{1,}$/;
+    if (
+      !hexRegex.test(secondPart) ||
+      parseInt(secondPart, 16) > parseInt(maxTime, 16)
+    ) {
       return false;
     }
 
@@ -81,6 +84,10 @@ class Collection {
     this.isValidDocumentId = this.database.isValidDocumentId.bind(
       this.database
     );
+    this.middlewares = {
+      pre: new Map(),
+      post: new Map(),
+    };
     this.query = {};
 
     if (!collectionName) {
@@ -97,6 +104,45 @@ class Collection {
       store[this.collectionName] = [];
       localStorage.setItem(this.database.dbName, JSON.stringify(store));
     }
+  }
+
+  pre(event, fn) {
+    if (!this.middlewares.pre.has(event)) {
+      this.middlewares.pre.set(event, []);
+    }
+    this.middlewares.pre.get(event).push(fn);
+  }
+
+  post(event, fn) {
+    if (!this.middlewares.post.has(event)) {
+      this.middlewares.post.set(event, []);
+    }
+    this.middlewares.post.get(event).push(fn);
+  }
+
+  runMiddlewares(type, event, data) {
+    const middlewares = this.middlewares[type].get(event) || [];
+    let i = 0;
+
+    return new Promise((resolve, reject) => {
+      function next(error, modifiedData) {
+        if (error) {
+          return reject(error);
+        }
+
+        if (i < middlewares.length) {
+          try {
+            middlewares[i++](modifiedData || data, next);
+          } catch (error) {
+            reject(error);
+          }
+        } else {
+          resolve(modifiedData || data);
+        }
+      }
+
+      next();
+    });
   }
 
   getCollectionAndStore() {
@@ -224,113 +270,163 @@ class Collection {
   }
 
   create(data) {
-    if (!Array.isArray(data)) {
-      data = [data];
-    }
+    return this.runMiddlewares("pre", "create", data)
+      .then((modifiedData) => {
+        data = modifiedData;
 
-    let { store, collection } = this.getCollectionAndStore();
+        if (!Array.isArray(data)) {
+          data = [data];
+        }
 
-    data.forEach((item) => {
-      if (!item || typeof item !== "object" || Object.keys(item).length === 0) {
-        throw new Error("Data must be a non-empty object.");
-      }
+        if (data.length === 0) throw new ErrorHandler("ccr001");
 
-      let _id = this.documentId();
-      item._id = _id;
-      item.createdAt = new Date().toISOString();
-      item.updatedAt = new Date().toISOString();
+        let { store, collection } = this.getCollectionAndStore();
+        data.forEach((item) => {
+          if (typeof item !== "object" || item === null)
+            throw new ErrorHandler("ccr002");
 
-      collection.push(item);
-    });
+          if (Object.keys(item).length === 0) {
+            throw new ErrorHandler("ccr003");
+          }
 
-    localStorage.setItem(this.database.dbName, JSON.stringify(store));
+          let _id = this.documentId();
+          item._id = _id;
+          item.createdAt = new Date().toISOString();
+          item.updatedAt = new Date().toISOString();
 
-    return data;
+          collection.push(item);
+        });
+
+        localStorage.setItem(this.database.dbName, JSON.stringify(store));
+
+        return this.runMiddlewares("post", "create", data);
+      })
+      .catch((error) => {
+        throw error;
+      });
   }
 
   findById(id) {
-    if (typeof id !== "string" || !this.isValidDocumentId(id)) {
-      throw new Error("Invalid id");
-    }
-    let { collection } = this.getCollectionAndStore();
-    return collection.find((document) => document._id === id);
+    return this.runMiddlewares("pre", "findById", id)
+      .then((modifiedId) => {
+        if (!modifiedId) throw new ErrorHandler("cfi001");
+
+        if (!this.isValidDocumentId(modifiedId)) {
+          throw new ErrorHandler("cfi002");
+        }
+
+        let { collection } = this.getCollectionAndStore();
+        const document = collection.find(
+          (document) => document._id === modifiedId
+        );
+
+        return this.runMiddlewares("post", "findById", document);
+      })
+      .catch((error) => {
+        throw error;
+      });
   }
 
   findOne(query) {
-    let { collection } = this.getCollectionAndStore();
+    return this.runMiddlewares("pre", "findOne", query).then(
+      (modifiedQuery) => {
+        if (!modifiedQuery) throw new ErrorHandler("cfo001");
 
-    if (typeof query !== "object" || query === null) {
-      throw new Error("Invalid query");
-    }
+        if (typeof query !== "object" || Object.keys(query).length === 0) {
+          throw new ErrorHandler("cfo002");
+        }
 
-    if (!Array.isArray(query)) {
-      if (typeof query === "object" && query !== null) {
-        query = [query];
-      } else {
-        throw new Error("Invalid query");
+        query = modifiedQuery;
+        let { collection } = this.getCollectionAndStore();
+
+        if (!Array.isArray(query)) {
+          if (typeof query === "object" && query !== null) {
+            query = [query];
+          } else {
+            throw new ErrorHandler("cfo003");
+          }
+        }
+
+        const document = collection.find((document) =>
+          query.some((condition) => this.matchesCondition(document, condition))
+        );
+
+        return this.runMiddlewares("post", "findOne", document);
       }
-    }
-
-    return collection.find((document) =>
-      query.some((condition) => this.matchesCondition(document, condition))
     );
   }
 
   find(query = {}) {
-    let { collection } = this.getCollectionAndStore();
+    return this.runMiddlewares("pre", "find", query).then((modifiedQuery) => {
+      if (!modifiedQuery) throw new ErrorHandler("cfo001");
 
-    if (!Array.isArray(query)) {
-      if (typeof query === "object" && query !== null) {
-        query = [query];
-      } else {
-        throw new Error("Invalid query");
+      query = modifiedQuery;
+
+      let { collection } = this.getCollectionAndStore();
+
+      if (!Array.isArray(query)) {
+        if (typeof query === "object" && query !== null) {
+          query = [query];
+        } else {
+          throw new ErrorHandler("cf001");
+        }
       }
-    }
 
-    let results = collection.filter((document) =>
-      query.some((condition) => this.matchesCondition(document, condition))
-    );
+      let results = collection.filter((document) =>
+        query.some((condition) => this.matchesCondition(document, condition))
+      );
 
-    let chainable = {
-      results: results,
-      sortField: "createdAt",
-      sortOrder: -1,
-      limit: 20,
-      skip: 0,
-      sortBy: function (field) {
-        this.sortField = field;
-        return this;
-      },
-      orderBy: function (order) {
-        this.sortOrder = order === "desc" ? -1 : 1;
-        return this;
-      },
-      limitBy: function (limit) {
-        this.limit = limit;
-        return this;
-      },
-      skipBy: function (skip) {
-        this.skip = skip;
-        return this;
-      },
-      exec: function () {
-        if (this.sortField) {
-          this.results.sort(
-            (a, b) =>
-              (a[this.sortField] < b[this.sortField] ? -1 : 1) * this.sortOrder
-          );
-        }
-        if (this.skip) {
-          this.results = this.results.slice(this.skip);
-        }
-        if (this.limit) {
-          this.results = this.results.slice(0, this.limit);
-        }
-        return this.results;
-      },
-    };
+      let chainable = {
+        results: results,
+        sortField: "createdAt",
+        sortOrder: -1,
+        limit: 20,
+        skip: 0,
+        sortBy: function (field) {
+          this.sortField = field;
+          return this;
+        },
+        orderBy: function (order) {
+          if (order !== "asc" && order !== "desc")
+            throw new ErrorHandler("cf002");
 
-    return chainable;
+          this.sortOrder = order === "desc" ? -1 : 1;
+          return this;
+        },
+        limitBy: function (limit) {
+          if (typeof limit !== "number" || limit < 0)
+            throw new ErrorHandler("cf003");
+
+          this.limit = limit;
+          return this;
+        },
+        skipBy: function (skip) {
+          if (typeof skip !== "number" || skip < 0)
+            throw new ErrorHandler("cf004");
+
+          this.skip = skip;
+          return this;
+        },
+        exec: function () {
+          if (this.sortField) {
+            this.results.sort(
+              (a, b) =>
+                (a[this.sortField] < b[this.sortField] ? -1 : 1) *
+                this.sortOrder
+            );
+          }
+          if (this.skip) {
+            this.results = this.results.slice(this.skip);
+          }
+          if (this.limit) {
+            this.results = this.results.slice(0, this.limit);
+          }
+          return this.results;
+        },
+      };
+
+      return this.runMiddlewares("post", "find", chainable);
+    });
   }
 
   update(query, data) {
@@ -465,26 +561,63 @@ class Collection {
   }
 }
 
+class ErrorHandler extends Error {
+  static ERRORS = {
+    ccr001: "Data must be a non-empty array of objects.",
+    ccr002: "Data must be an object.",
+    ccr003: "Data must be a non-empty object.",
+    cfi001: "Id must non-empty string.",
+    cfi002: "Invalid document Id.",
+    cfo001: "Query must be non-empty.",
+    cfo002: "Query must be non-empty object or array of objects.",
+    cfo003: "Invalid query.",
+    cfo004: "No document found with the provided query.",
+    cf001: "Invalid query.",
+    cf002: "orderBy must be 'asc' or 'desc'",
+    cf003: "limitBy must be a positive number.",
+    cf004: "skipBy must be a positive number.",
+    cf005: "",
+  };
+
+  constructor(code, customMessage) {
+    super();
+    this.code = code;
+    this.message = customMessage || ErrorHandler.ERRORS[code];
+  }
+}
+
 const db = new Database("store");
 const users = db.collection("users");
+const posts = db.collection("posts");
 
-let results = users
-  .find({
-    $not: [
-      {
-        gender_abbr: {
-          $in: ["M"],
-        },
-      },
-    ],
+users.pre("findOne", function (data, next) {
+  console.log("pre 💣", data);
+  next();
+});
+
+users.post("findOne", function (data, next) {
+  console.log("post 🚀", data);
+});
+
+const query = [
+  {
+    gender_abbr: "M",
+  },
+];
+
+users
+  .find(query)
+  .then((chainable) => {
+    return chainable.sortBy("age").orderBy("desc").limitBy(10).skipBy(5).exec();
   })
-  .exec();
-
-console.log(results.length);
-results.map((user) => console.log(user));
+  .then((data) => {
+    console.log(data);
+  })
+  .catch((error) => {
+    console.log(error.code, error.message);
+  });
 
 /*
-
 
 
 */
