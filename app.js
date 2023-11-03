@@ -7,7 +7,7 @@ TODO:[] fix number sensitive queries.
 TODO:[] Error Handling
 TODO:[] Validation Schema Support
 TODO:[] Association Handling (Populate)(One to One, One to Many, Many to Many)
-TODO:[] Hooks/Middleware
+TODO:[*] Hooks/Middleware
 TODO:[] Static Methods
 TODO:[] Query Optimization
 */
@@ -341,11 +341,12 @@ class Collection {
       (modifiedQuery) => {
         if (!modifiedQuery) throw new ErrorHandler("cfo001");
 
+        query = modifiedQuery;
+
         if (typeof query !== "object" || Object.keys(query).length === 0) {
           throw new ErrorHandler("cfo002");
         }
 
-        query = modifiedQuery;
         let { collection } = this.getCollectionAndStore();
 
         if (!Array.isArray(query)) {
@@ -439,42 +440,53 @@ class Collection {
   }
 
   update(query, data) {
-    if (
-      typeof data !== "object" ||
-      data === null ||
-      Object.keys(data).length === 0
-    ) {
-      throw new Error("Invalid data");
-    }
+    return this.runMiddlewares("pre", "update", { query, data }).then(
+      (modifiedData) => {
+        if (!modifiedData) throw new ErrorHandler("cui001");
 
-    let { store, collection } = this.getCollectionAndStore();
+        query = modifiedData.query;
+        data = modifiedData.data;
 
-    if (!Array.isArray(query)) {
-      if (typeof query === "object" && query !== null) {
-        query = [query];
-      } else {
-        throw new Error("Invalid query");
-      }
-    }
-
-    let updatedDocuments = [];
-    collection.forEach((document, index) => {
-      if (
-        query.some((condition) => this.matchesCondition(document, condition))
-      ) {
-        for (let key in data) {
-          document[key] = data[key];
+        if (
+          typeof data !== "object" ||
+          data === null ||
+          Object.keys(data).length === 0
+        ) {
+          throw new ErrorHandler("cu002");
         }
-        document.updatedAt = new Date().toISOString();
-        updatedDocuments.push(document);
-        collection[index] = document;
+
+        let { store, collection } = this.getCollectionAndStore();
+
+        if (!Array.isArray(query)) {
+          if (typeof query === "object" && query !== null) {
+            query = [query];
+          } else {
+            throw new ErrorHandler("cu003");
+          }
+        }
+
+        let updatedDocuments = [];
+        collection.forEach((document, index) => {
+          if (
+            query.some((condition) =>
+              this.matchesCondition(document, condition)
+            )
+          ) {
+            for (let key in data) {
+              document[key] = data[key];
+            }
+            document.updatedAt = new Date().toISOString();
+            updatedDocuments.push(document);
+            collection[index] = document;
+          }
+        });
+
+        store[this.collectionName] = collection;
+        localStorage.setItem(this.database.dbName, JSON.stringify(store));
+
+        return this.runMiddlewares("post", "update", updatedDocuments);
       }
-    });
-
-    store[this.collectionName] = collection;
-    localStorage.setItem(this.database.dbName, JSON.stringify(store));
-
-    return updatedDocuments;
+    );
   }
 
   updateById(id, data) {
@@ -525,58 +537,74 @@ class Collection {
   }
 
   remove(query) {
-    if (!Array.isArray(query)) {
-      if (typeof query === "object" && query !== null) {
-        query = [query];
-      } else {
-        throw new Error("Invalid query");
-      }
-    }
+    return this.runMiddlewares("pre", "remove", query).then((modifiedQuery) => {
+      if (!modifiedQuery) throw new ErrorHandler("cm001");
 
-    let { store, collection } = this.getCollectionAndStore();
+      query = modifiedQuery;
 
-    let removedDocuments = [];
-    let updatedCollection = collection.filter((document) => {
-      if (
-        query.length === 0 ||
-        query.some((condition) => this.matchesCondition(document, condition))
-      ) {
-        removedDocuments.push(document);
-        return false;
+      if (typeof query !== "object" || Object.keys(query).length === 0) {
+        throw new ErrorHandler("cm002");
       }
-      return true;
+
+      if (!Array.isArray(query)) {
+        if (typeof query === "object" && query !== null) {
+          query = [query];
+        } else {
+          throw new ErrorHandler("cm003");
+        }
+      }
+
+      let { store, collection } = this.getCollectionAndStore();
+
+      let removedDocuments = [];
+      let updatedCollection = collection.filter((document) => {
+        if (
+          query.length === 0 ||
+          query.some((condition) => this.matchesCondition(document, condition))
+        ) {
+          removedDocuments.push(document);
+          return false;
+        }
+        return true;
+      });
+
+      store[this.collectionName] = updatedCollection;
+      localStorage.setItem(this.database.dbName, JSON.stringify(store));
+
+      return this.runMiddlewares("post", "remove", removedDocuments);
     });
-
-    store[this.collectionName] = updatedCollection;
-    localStorage.setItem(this.database.dbName, JSON.stringify(store));
-
-    return removedDocuments;
   }
 
   removeById(id) {
-    if (typeof id !== "string" || !this.isValidDocumentId(id)) {
-      throw new Error("Invalid id");
-    }
+    return this.runMiddlewares("pre", "removeById", id).then((modifiedId) => {
+      if (!modifiedId) throw new ErrorHandler("cfi001");
 
-    let { store, collection } = this.getCollectionAndStore();
-
-    let removedDocument = null;
-    let updatedCollection = collection.filter((document, index) => {
-      if (document._id === id) {
-        removedDocument = document;
-        return false;
+      if (!this.isValidDocumentId(id)) {
+        throw new ErrorHandler("cmi002");
       }
-      return true;
+
+      id = modifiedId;
+
+      let { store, collection } = this.getCollectionAndStore();
+
+      let removedDocument = null;
+      let updatedCollection = collection.filter((document, index) => {
+        if (document._id === id) {
+          removedDocument = document;
+          return false;
+        }
+        return true;
+      });
+
+      if (!removedDocument) {
+        throw new ErrorHandler("cmi003");
+      }
+
+      store[this.collectionName] = updatedCollection;
+      localStorage.setItem(this.database.dbName, JSON.stringify(store));
+
+      return this.runMiddlewares("post", "removeById", removedDocument);
     });
-
-    if (!removedDocument) {
-      throw new Error("No document found with the provided id");
-    }
-
-    store[this.collectionName] = updatedCollection;
-    localStorage.setItem(this.database.dbName, JSON.stringify(store));
-
-    return removedDocument;
   }
 }
 
@@ -600,6 +628,18 @@ class ErrorHandler extends Error {
     cui003: "Must be a valid document id",
     cdi004: "Invalid data",
     cdi005: "No document found with the provided id",
+    cu001: "Invalid data, Must have an query and data",
+    cd002: "Invalid data",
+    cu003: "Invalid query.",
+    cri001: "Invalid data, Must have an query and data",
+    cri001: "Invalid data, Must have an query and data",
+    cri001: "Invalid data, Must have an query and data",
+    cmi001: "Id must non-empty string.",
+    cmi002: "Invalid document Id.",
+    cmi003: "No document found with the provided id",
+    cm001: "Query must be non-empty.",
+    cm002: "Query must be non-empty object or array of objects.",
+    cm003: "Invalid query.",
   };
 
   constructor(code, customMessage) {
@@ -611,29 +651,4 @@ class ErrorHandler extends Error {
 
 const db = new Database("store");
 const users = db.collection("users");
-
-users
-  .updateById("r9g3cyfozn-4da12ed2694", {
-    nickname: "Holo",
-    bio: "I am a wolf harvest deity.",
-  })
-  .then((updatedData) => {
-    console.log(updatedData);
-  })
-  .catch((error) => {
-    console.log(error.code, error.message);
-  });
-
-users
-  .findOne({ first_name: "Sizar" })
-  .then((data) => {
-    console.log(JSON.stringify(data, null, 2));
-  })
-  .catch((error) => {
-    console.log(error);
-  });
-
-/*
-
-
-*/
+const posts = db.collection("posts");
