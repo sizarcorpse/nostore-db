@@ -28,10 +28,15 @@ class Database {
     }
   }
 
-  collection(collectionName) {
-    return new Collection(this, collectionName);
-  }
+  collection(collectionName, schema) {
+    // Only check if schema is a Schema instance if a schema was provided
+    if (schema && !(schema instanceof Schema)) {
+      throw new Error("The schema argument must be an instance of Schema");
+    }
 
+    // Create a new Collection instance with the schema, which may be undefined
+    return new Collection(this, collectionName, schema);
+  }
   getInfo() {
     let store = JSON.parse(localStorage.getItem(this.dbName));
     let collectionNames = Object.keys(store);
@@ -86,9 +91,10 @@ class Database {
 }
 
 class Collection {
-  constructor(database, collectionName) {
+  constructor(database, collectionName, schema) {
     this.database = database;
     this.collectionName = collectionName;
+    this.schema = schema;
     this.documentId = this.database.documentId.bind(this.database);
     this.isValidDocumentId = this.database.isValidDocumentId.bind(
       this.database
@@ -309,6 +315,10 @@ class Collection {
 
           if (Object.keys(item).length === 0) {
             throw new ErrorHandler("ccr003");
+          }
+
+          if (this.schema) {
+            this.schema.validate(item);
           }
 
           let _id = this.documentId();
@@ -662,6 +672,121 @@ class ErrorHandler extends Error {
   }
 }
 
+class Schema {
+  constructor(definition) {
+    this.definition = definition;
+  }
+
+  validate(data) {
+    for (let key in data) {
+      if (!this.definition[key]) {
+        throw new Error(`Field ${key} is not in the schema`);
+      }
+    }
+
+    for (let key in this.definition) {
+      let value = data[key];
+      let field = this.definition[key];
+
+      if (
+        typeof field === "object" &&
+        !(field instanceof Array) &&
+        field.type
+      ) {
+        if (
+          field.required &&
+          (typeof field.required === "function"
+            ? field.required(data)
+            : field.required) &&
+          value === undefined
+        ) {
+          throw new Error(field.message || `${key} is required`);
+        }
+
+        if (value !== undefined) {
+          if (typeof value !== field.type) {
+            throw new Error(`Field ${key} is not the correct type`);
+          }
+
+          if (
+            field.pattern &&
+            typeof value === "string" &&
+            !field.pattern.test(value)
+          ) {
+            throw new Error(
+              field.message ||
+                `${key} does not match the pattern ${field.pattern}`
+            );
+          }
+
+          if (field.min && this.getLength(value, field.type) < field.min) {
+            throw new Error(
+              field.message || `${key} should be at least ${field.min} long`
+            );
+          }
+
+          if (field.max && this.getLength(value, field.type) > field.max) {
+            throw new Error(
+              field.message || `${key} should be at most ${field.max} long`
+            );
+          }
+
+          if (field.enum && !field.enum.includes(value)) {
+            throw new Error(
+              field.message ||
+                `${key} should be one of ${field.enum.join(", ")}`
+            );
+          }
+
+          if (field.properties) {
+            if (typeof value !== "object" || value instanceof Array) {
+              throw new Error(`Field ${key} is not the correct type`);
+            }
+            new Schema(field.properties).validate(value);
+          }
+        }
+
+        if (value === undefined && field.default !== undefined) {
+          data[key] = field.default;
+          value = field.default;
+        }
+
+        if (field.validate && typeof field.validate === "function") {
+          let isValid = field.validate(value, data);
+          if (!isValid) {
+            throw new Error(
+              field.message || `Validation failed for field "${key}"`
+            );
+          }
+        }
+      } else if (
+        field &&
+        typeof field === "object" &&
+        !(field instanceof Array)
+      ) {
+        new Schema(field).validate(value);
+      } else if (field && field[0] && value && value instanceof Array) {
+        value.forEach((item) => new Schema(field[0]).validate(item));
+      }
+    }
+  }
+
+  getLength(value, type) {
+    switch (type) {
+      case "string":
+      case "array":
+        return value.length;
+      case "number":
+        return value;
+      case "object":
+        return Object.keys(value).length;
+      default:
+        return 0;
+    }
+  }
+}
+
 const db = new Database("store");
+
 const users = db.collection("users");
 const posts = db.collection("posts");
