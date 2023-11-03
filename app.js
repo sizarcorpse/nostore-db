@@ -115,6 +115,19 @@ class Collection {
     }
   }
 
+  addStaticMethod(name, fn) {
+    if (typeof name !== "string") {
+      throw new Error("Method name must be a string");
+    }
+    if (typeof fn !== "function") {
+      throw new Error("Second argument must be a function");
+    }
+    if (this[name]) {
+      throw new Error(`Method ${name} already exists on this collection`);
+    }
+    this[name] = fn;
+  }
+
   pre(event, fn) {
     if (!this.middlewares.pre.has(event)) {
       this.middlewares.pre.set(event, []);
