@@ -673,100 +673,154 @@ class ErrorHandler extends Error {
 }
 
 class Schema {
-  constructor(definition) {
-    this.definition = definition;
+  constructor(def) {
+    this.def = def;
   }
 
   validate(data) {
+    this.checkData(data);
+    this.checkDefinition(data);
+  }
+
+  checkData(data) {
     for (let key in data) {
-      if (!this.definition[key]) {
+      if (!this.def[key]) {
         throw new Error(`Field ${key} is not in the schema`);
       }
     }
+  }
 
-    for (let key in this.definition) {
+  checkDefinition(data) {
+    for (let key in this.def) {
       let value = data[key];
-      let field = this.definition[key];
+      let field = this.def[key];
 
-      if (
-        typeof field === "object" &&
-        !(field instanceof Array) &&
-        field.type
-      ) {
-        if (
-          field.required &&
-          (typeof field.required === "function"
-            ? field.required(data)
-            : field.required) &&
-          value === undefined
-        ) {
-          throw new Error(field.message || `${key} is required`);
-        }
-
-        if (value !== undefined) {
-          if (typeof value !== field.type) {
-            throw new Error(`Field ${key} is not the correct type`);
-          }
-
-          if (
-            field.pattern &&
-            typeof value === "string" &&
-            !field.pattern.test(value)
-          ) {
-            throw new Error(
-              field.message ||
-                `${key} does not match the pattern ${field.pattern}`
-            );
-          }
-
-          if (field.min && this.getLength(value, field.type) < field.min) {
-            throw new Error(
-              field.message || `${key} should be at least ${field.min} long`
-            );
-          }
-
-          if (field.max && this.getLength(value, field.type) > field.max) {
-            throw new Error(
-              field.message || `${key} should be at most ${field.max} long`
-            );
-          }
-
-          if (field.enum && !field.enum.includes(value)) {
-            throw new Error(
-              field.message ||
-                `${key} should be one of ${field.enum.join(", ")}`
-            );
-          }
-
-          if (field.properties) {
-            if (typeof value !== "object" || value instanceof Array) {
-              throw new Error(`Field ${key} is not the correct type`);
-            }
-            new Schema(field.properties).validate(value);
-          }
-        }
-
-        if (value === undefined && field.default !== undefined) {
-          data[key] = field.default;
-          value = field.default;
-        }
-
-        if (field.validate && typeof field.validate === "function") {
-          let isValid = field.validate(value, data);
-          if (!isValid) {
-            throw new Error(
-              field.message || `Validation failed for field "${key}"`
-            );
-          }
-        }
-      } else if (
-        field &&
-        typeof field === "object" &&
-        !(field instanceof Array)
-      ) {
+      if (this.isObject(field) && field.type) {
+        this.validateField(key, value, field, data);
+      } else if (this.isObject(field)) {
         new Schema(field).validate(value);
       } else if (field && field[0] && value && value instanceof Array) {
         value.forEach((item) => new Schema(field[0]).validate(item));
+      } else if (field && field[0]) {
+        this.validateArray(key, value, field);
+      }
+    }
+  }
+
+  isObject(field) {
+    return typeof field === "object" && !(field instanceof Array);
+  }
+
+  validateField(key, value, field, data) {
+    this.checkRequired(key, value, field);
+    this.checkValue(key, value, field, data);
+    this.checkProps(key, value, field);
+    this.setDefault(key, value, field, data);
+    this.customValidate(key, value, field, data);
+  }
+
+  checkRequired(key, value, field) {
+    if (field.required && this.isMissing(value, field)) {
+      throw new Error(field.message || `${key} is required`);
+    }
+  }
+
+  isMissing(value, field) {
+    return (
+      (typeof field.required === "function"
+        ? field.required(data)
+        : field.required) && value === undefined
+    );
+  }
+
+  checkValue(key, value, field, data) {
+    if (value !== undefined) {
+      this.checkType(key, value, field);
+      this.checkPattern(key, value, field);
+      this.checkLength(key, value, field);
+      this.checkEnum(key, value, field);
+    }
+  }
+
+  checkType(key, value, field) {
+    if (typeof value !== field.type) {
+      throw new Error(`Field ${key} is not the correct type`);
+    }
+  }
+
+  checkPattern(key, value, field) {
+    if (
+      field.pattern &&
+      typeof value === "string" &&
+      !field.pattern.test(value)
+    ) {
+      throw new Error(
+        field.message || `${key} does not match the pattern ${field.pattern}`
+      );
+    }
+  }
+
+  checkLength(key, value, field) {
+    if (field.min && this.getLength(value, field.type) < field.min) {
+      throw new Error(
+        field.message || `${key} should be at least ${field.min} long`
+      );
+    }
+
+    if (field.max && this.getLength(value, field.type) > field.max) {
+      throw new Error(
+        field.message || `${key} should be at most ${field.max} long`
+      );
+    }
+  }
+
+  checkEnum(key, value, field) {
+    if (field.enum && !field.enum.includes(value)) {
+      throw new Error(
+        field.message || `${key} should be one of ${field.enum.join(", ")}`
+      );
+    }
+  }
+
+  checkProps(key, value, field) {
+    if (field.properties) {
+      if (typeof value !== "object" || value instanceof Array) {
+        throw new Error(`Field ${key} is not the correct type`);
+      }
+      new Schema(field.properties).validate(value);
+    }
+  }
+
+  validateArray(key, value, field) {
+    if (value && value instanceof Array) {
+      value.forEach((item, index) => {
+        if (field[0] instanceof Array) {
+          this.validateArray(`${key}[${index}]`, item, field[0]);
+        } else if (typeof field[0] === "object") {
+          new Schema(field[0]).validate(item);
+        } else {
+          if (typeof item !== field[0]) {
+            throw new Error(`Field ${key}[${index}] is not the correct type`);
+          }
+        }
+      });
+    }
+  }
+
+  setDefault(key, value, field, data) {
+    if (value === undefined && field.default !== undefined) {
+      data[key] = field.default;
+      value = field.default;
+    }
+  }
+
+  customValidate(key, value, field, data) {
+    if (field.validate && typeof field.validate === "function") {
+      let isValid = field.validate(value, data);
+      if (!isValid) {
+        throw new Error(
+          field.message || `Validation failed for field "${key}"`
+        );
       }
     }
   }
@@ -787,6 +841,5 @@ class Schema {
 }
 
 const db = new Database("store");
-
-const users = db.collection("users");
+const users = db.collection("users", schema);
 const posts = db.collection("posts");
