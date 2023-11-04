@@ -6,55 +6,7 @@
     <title>Document</title>
   </head>
   <body>
+    <div class="render"></div>
     <script src="./app.js"></script>
   </body>
 </html>
-
-<!-- 
-do we make those methods async? const users = await db.collection("users"); if (users) { ...do something }
-do we make those methods return a callback/promise? db.collection("users").then(users => { ...do something }) what is the best way to handle this? what is you recommendation?
-
-Whether to make these methods asynchronous and return a Promise depends on the nature of the operations they perform.
-
-In the case of the Database class we've been building, all the operations are synchronous. They involve reading and writing to localStorage, which are synchronous operations in JavaScript. Therefore, there's no need to make these methods asynchronous or return a Promise.
-
-However, if you were interacting with a real database, these operations would likely be asynchronous. Database operations can take a significant amount of time, and you wouldn't want to block the rest of your code while waiting for them to complete. In that case, you would want to make these methods asynchronous and return a Promise.
-
-In summary, for the Database class we've been building, there's no need to make the methods asynchronous or return a Promise. But for a real-world application that interacts with a database, you would likely want to do so.
-
- -->
-
-<!-- users.insert([
-  { name: "John", age: 25, city: "London", country: "UK", gender: "Male" },
-  { name: "Jane", age: 22, city: "Paris", country: "France", gender: "Female" },
-  { name: "Fred", age: 29, city: "New York", country: "USA", gender: "Male" },
-  { name: "Bob", age: 32, city: "London", country: "UK", gender: "Male" },
-  {
-    name: "Alice",
-    age: 27,
-    city: "Paris",
-    country: "France",
-    gender: "Female",
-  },
-  {
-    name: "Richard",
-    age: 38,
-    city: "New York",
-    country: "USA",
-    gender: "Male",
-  },
-  {
-    name: "Matthew",
-    age: 35,
-    city: "London",
-    country: "UK",
-    gender: "Male",
-  },
-  {
-    name: "Laura",
-    age: 31,
-    city: "Paris",
-    country: "France",
-    gender: "Female",
-  },
-]); -->
